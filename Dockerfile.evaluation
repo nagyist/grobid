@@ -1,10 +1,9 @@
 ## Grobid evaluation image
-
+## ------
 # https://grobid.readthedocs.io/en/latest/End-to-end-evaluation/
+# NOTE: To match the exact evaluation published in the Grobid documentation is necessary to have a running Biblio-glutton instance
 
-# docker run -t --rm --init -p 8070:8070 -p 8071:8071 -v /home/lopez/grobid/grobid-home/config/grobid.properties:/opt/grobid/grobid-home/config/grobid.properties:ro  grobid/grobid:0.8.0
-
-FROM lfoppiano/grobid:0.8.1 as runtime
+FROM lfoppiano/grobid:0.8.1-full as runtime
 
 # setting locale is likely useless but to be sure
 ENV LANG C.UTF-8
