@@ -65,4 +65,5 @@ nameToUnicode      ../languages/xpdf-others/taboldstyle.nameToUnicode
 nameToUnicode      ../languages/xpdf-others/ligatures.nameToUnicode
 nameToUnicode      ../languages/xpdf-others/fitted.nameToUnicode
 nameToUnicode      ../languages/xpdf-others/others.nameToUnicode
+nameToUnicode      ../languages/xpdf-others/sc.nameToUnicode
 #----- end oldstyle support package
