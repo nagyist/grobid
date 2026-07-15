@@ -148,7 +148,7 @@ public class AffiliationAddressParser extends AbstractParser {
             GrobidAnalysisConfig config) {
         List<Affiliation> results = null;
         try {
-            if ((tokenizations == null) || (tokenizations.size() == 0)) {
+            if (CollectionUtils.isEmpty(tokenizations)) {
                 return null;
             }
 
@@ -158,8 +158,6 @@ public class AffiliationAddressParser extends AbstractParser {
             }
 
             List<String> affiliationBlocks = getAffiliationBlocksFromSegments(tokenizations);
-
-            //System.out.println(affiliationBlocks.toString());
 
             List<List<OffsetPosition>> placesPositions = new ArrayList<>();
             List<List<OffsetPosition>> countriesPositions = new ArrayList<>();
@@ -200,6 +198,16 @@ public class AffiliationAddressParser extends AbstractParser {
 
         String tokenLabel = null;
         boolean newline = true;
+        // Tracks whether a <marker> cluster was seen since the last <institution>
+        // cluster on the current affiliation. Used below to split when the
+        // pattern is institution → marker → institution (each institution
+        // belongs to a different author marker), without affecting the
+        // institution → institution (no marker between) case which legitimately
+        // collects multiple sub-institutions into one affiliation.
+        boolean markerSinceLastInstitution = false;
+        double lastY = -1;
+        int lastPage = -1;
+        int lastEnd = -1;
         List<TaggingTokenCluster> clusters = clusteror.cluster();
         for (TaggingTokenCluster cluster : clusters) {
             if (cluster == null) {
@@ -216,21 +224,70 @@ public class AffiliationAddressParser extends AbstractParser {
 
             List<LayoutToken> tokens = cluster.concatTokens();
 
+            // HEADER segment-boundary force-split: when callers (e.g. HeaderParser)
+            // pass several <affiliation> clusters as separate List<LayoutToken>
+            // segments, processingLayoutTokens flattens them and getAffiliationBlocksFromSegments
+            // marks the boundary by an offset gap > 2 (line 100). Without an
+            // explicit split here, a DEPARTMENT cluster from a new segment can
+            // attach to the previous segment's INSTITUTION because the per-label
+            // split logic below only fires on label repetition.
+            if (!tokens.isEmpty() && lastEnd >= 0) {
+                int currentStart = tokens.get(0).getOffset();
+                if (currentStart - lastEnd > 2 && affiliation.isNotNull()) {
+                    affiliations.add(affiliation);
+                    affiliation = new Affiliation();
+                    newline = true;
+                }
+            }
+
+            // Detect a line break across the previous cluster boundary by comparing
+            // page/Y of the first token here against the last token of the previous
+            // cluster. Header-model segment boundaries do not carry a \n LayoutToken
+            // in the flattened token stream, so the existing \n-text check below is
+            // not sufficient.
+            if (!tokens.isEmpty() && lastY >= 0) {
+                LayoutToken firstToken = tokens.get(0);
+                if (firstToken.getPage() != lastPage || Math.abs(firstToken.getY() - lastY) >= 1.0) {
+                    newline = true;
+                }
+            }
+
             if (clusterLabel.equals(TaggingLabels.AFFILIATION_MARKER)) {
                 // if an affiliation has already a merker, or if a marker start a line,
                 // we introduce a new affiliation
                 if (affiliation.getMarker() != null || newline) {
+                    Affiliation closed = null;
                     if (affiliation.isNotNull()) {
                         affiliations.add(affiliation);
+                        closed = affiliation;
                     }
-                    affiliation = new Affiliation();
+                    // Consecutive markers attached to the same institution
+                    // (e.g. "X¹,²" — multiple author markers stacked on one
+                    // institution): clone the just-closed affiliation so each
+                    // marker resolves to the same institution content. We use
+                    // markerSinceLastInstitution rather than the previous
+                    // cluster's label so a <other> token between markers (a
+                    // comma in "²,³") doesn't defeat the detection.
+                    if (closed != null
+                            && markerSinceLastInstitution
+                            && CollectionUtils.isNotEmpty(closed.getInstitutions())) {
+                        affiliation = cloneAffiliationContent(closed);
+                        affiliation.setMarker(null);
+                    } else {
+                        affiliation = new Affiliation();
+                    }
                 }
 
                 affiliation.setMarker(clusterContent);
                 affiliation.addLabeledResult(TaggingLabels.AFFILIATION_MARKER, tokens);
+                markerSinceLastInstitution = true;
             } else if (clusterLabel.equals(TaggingLabels.AFFILIATION_INSTITUTION)) {
                 if (affiliation.getInstitutions() != null && affiliation.getInstitutions().size() > 0) {
-                    if (affiliation.hasAddress()) {
+                    // Split when a marker has appeared between this and the
+                    // previous institution: the model emitted institution → marker →
+                    // institution because each institution belongs to a different
+                    // author marker (e.g. "Concordia University¹ North South University²").
+                    if (affiliation.hasAddress() || newline || markerSinceLastInstitution) {
                         // new affiliation
                         if (affiliation.isNotNull()) {
                             affiliations.add(affiliation);
@@ -240,9 +297,10 @@ public class AffiliationAddressParser extends AbstractParser {
                 }
                 affiliation.addInstitution(clusterContent);
                 affiliation.addLabeledResult(TaggingLabels.AFFILIATION_INSTITUTION, tokens);
+                markerSinceLastInstitution = false;
             } else if (clusterLabel.equals(TaggingLabels.AFFILIATION_DEPARTMENT)) {
                 if (affiliation.getDepartments() != null && affiliation.getDepartments().size() > 0) {
-                    if (affiliation.hasAddress()) {
+                    if (affiliation.hasAddress() || newline) {
                         // new affiliation
                         if (affiliation.isNotNull()) {
                             affiliations.add(affiliation);
@@ -254,7 +312,7 @@ public class AffiliationAddressParser extends AbstractParser {
                 affiliation.addLabeledResult(TaggingLabels.AFFILIATION_DEPARTMENT, tokens);
             } else if (clusterLabel.equals(TaggingLabels.AFFILIATION_LABORATORY)) {
                 if (affiliation.getLaboratories() != null && affiliation.getLaboratories().size() > 0) {
-                    if (affiliation.hasAddress()) {
+                    if (affiliation.hasAddress() || newline) {
                         // new affiliation
                         if (affiliation.isNotNull()) {
                             affiliations.add(affiliation);
@@ -324,6 +382,12 @@ public class AffiliationAddressParser extends AbstractParser {
                 LayoutToken lastToken = tokens.get(tokens.size() - 1);
                 if (lastToken.getText() != null && lastToken.getText().equals("\n"))
                     newline = true;
+                if (lastToken.getY() >= 0) {
+                    lastY = lastToken.getY();
+                    lastPage = lastToken.getPage();
+                }
+                String lastText = lastToken.getText();
+                lastEnd = lastToken.getOffset() + (lastText == null ? 0 : lastText.length());
             }
         }
 
@@ -500,7 +564,7 @@ public class AffiliationAddressParser extends AbstractParser {
                                 }
                             } else if (s1.equals("I-<institution>")) {
                                 // we have multiple institutions for this affiliation
-                                //aff.addInstitution(aff.institution);
+                                // aff.addInstitution(aff.institution);
                                 aff.addInstitution(s2);
                             } else if (addSpace) {
                                 aff.extendLastInstitution(" " + s2);
@@ -599,12 +663,12 @@ public class AffiliationAddressParser extends AbstractParser {
                             } else if (s1.equals("I-<department>")) {
                                 // we have multiple departments for this affiliation
                                 aff.addDepartment(s2);
-                                //aff.department = s2;
+                                // aff.department = s2;
                             } else if (addSpace) {
-                                //aff.extendFirstDepartment(" " + s2);
+                                // aff.extendFirstDepartment(" " + s2);
                                 aff.extendLastDepartment(" " + s2);
                             } else {
-                                //aff.extendFirstDepartment(s2);
+                                // aff.extendFirstDepartment(s2);
                                 aff.extendLastDepartment(s2);
                             }
                         } else if (aff.getInstitutions() != null) {
@@ -1344,5 +1408,30 @@ public class AffiliationAddressParser extends AbstractParser {
             }
         }
         return res;
+    }
+
+    /**
+     * Clone an Affiliation's content so the clone can be mutated without
+     * corrupting the original. The default Affiliation copy constructor
+     * shares list references (institutions, departments, laboratories,
+     * layoutTokens); subsequent additions to either side would mutate the
+     * other. Used when consecutive markers attach to one institution and
+     * each marker needs its own Affiliation pointing to the same content.
+     */
+    private static Affiliation cloneAffiliationContent(Affiliation src) {
+        Affiliation copy = new Affiliation(src);
+        if (copy.getInstitutions() != null) {
+            copy.setInstitutions(new ArrayList<>(copy.getInstitutions()));
+        }
+        if (copy.getDepartments() != null) {
+            copy.setDepartments(new ArrayList<>(copy.getDepartments()));
+        }
+        if (copy.getLaboratories() != null) {
+            copy.setLaboratories(new ArrayList<>(copy.getLaboratories()));
+        }
+        if (copy.getLayoutTokens() != null) {
+            copy.setLayoutTokens(new ArrayList<>(copy.getLayoutTokens()));
+        }
+        return copy;
     }
 }

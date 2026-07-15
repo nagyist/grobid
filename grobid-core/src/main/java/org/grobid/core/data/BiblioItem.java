@@ -31,6 +31,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.grobid.core.GrobidModels;
+import org.grobid.core.data.util.AuthorAffiliationAssigner;
 import org.grobid.core.data.util.AuthorEmailAssigner;
 import org.grobid.core.data.util.ClassicAuthorEmailAssigner;
 import org.grobid.core.data.util.EmailSanitizer;
@@ -151,7 +152,7 @@ public class BiblioItem {
 
     // for convenience GROBIDesque
     private String authors = null;
-    //private List<LayoutToken> authorsTokens = new ArrayList<>();
+    // private List<LayoutToken> authorsTokens = new ArrayList<>();
     private String firstAuthorSurname = null;
     private String location = null;
     private String bookTitle = null;
@@ -186,7 +187,8 @@ public class BiblioItem {
     private String confidence = null;
     private double conf = 0.0;
 
-    // abstract labeled featured sequence (to produce a structured abstract with, in particular, reference callout)
+    // abstract labeled featured sequence (to produce a structured abstract with, in
+    // particular, reference callout)
     private String labeledAbstract = null;
 
     // date for electronic publishing
@@ -980,7 +982,7 @@ public class BiblioItem {
         doi = doi.replace(" ", "");
         doi = doi.replaceAll("https?\\://(dx\\.)?doi\\.org/", "");
 
-        //bibl = bibl.replace("//", "/");
+        // bibl = bibl.replace("//", "/");
         if (doi.toLowerCase().startsWith("doi:") || doi.toLowerCase().startsWith("doi/")) {
             doi = doi.substring(4);
         }
@@ -1723,7 +1725,7 @@ public class BiblioItem {
             res = res.trim();
         }
 
-        //res = res.replace("@BULLET", " • ");
+        // res = res.replace("@BULLET", " • ");
 
         res = res.replace("( ", "(");
         res = res.replace(" )", ")");
@@ -3547,181 +3549,7 @@ public class BiblioItem {
      * Attach existing recognized affiliations to authors
      */
     public void attachAffiliations() {
-        if (fullAffiliations == null) {
-            return;
-        }
-
-        if (fullAuthors == null) {
-            return;
-        }
-        int nbAffiliations = fullAffiliations.size();
-        int nbAuthors = fullAuthors.size();
-
-        boolean hasMarker = false;
-
-        // do we have markers in the affiliations?
-        for (Affiliation aff : fullAffiliations) {
-            if (aff.getMarker() != null) {
-                hasMarker = true;
-                break;
-            }
-        }
-
-        if (nbAffiliations == 1) {
-            // we distribute this affiliation to each author
-            Affiliation aff = fullAffiliations.get(0);
-            for (Person aut : fullAuthors) {
-                aut.addAffiliation(aff);
-            }
-            aff.setFailAffiliation(false);
-        } else if ((nbAuthors == 1) && (nbAffiliations > 1)) {
-            // we put all the affiliations to the single author
-            Person auth = fullAuthors.get(0);
-            for (Affiliation aff : fullAffiliations) {
-                auth.addAffiliation(aff);
-                aff.setFailAffiliation(false);
-            }
-        } else if (hasMarker) {
-            // we get the marker for each affiliation and try to find the related author in the
-            // original author field
-            int indexAffiliation = 0;
-            for (Affiliation aff : fullAffiliations) {
-
-                // circuit breaker
-                if (indexAffiliation > 60)
-                    break;
-
-                if (aff.getMarker() != null && aff.getMarker().length() > 0) {
-                    String marker = aff.getMarker();
-                    int from = 0;
-                    int ind = 0;
-                    ArrayList<Integer> winners = new ArrayList<Integer>();
-                    while (ind != -1) {
-                        ind = originalAuthors.indexOf(marker, from);
-
-                        boolean bad = false;
-                        if (ind != -1) {
-                            // we check if we have a digit/letter (1) matching incorrectly
-                            //  a double digit/letter (11), or a special non-digit (*) matching incorrectly
-                            //  a double special non-digit (**)
-                            if (marker.length() == 1) {
-                                if (Character.isDigit(marker.charAt(0))) {
-                                    if (ind - 1 > 0) {
-                                        if (Character.isDigit(originalAuthors.charAt(ind - 1))) {
-                                            bad = true;
-                                        }
-                                    }
-                                    if (ind + 1 < originalAuthors.length()) {
-                                        if (Character.isDigit(originalAuthors.charAt(ind + 1))) {
-                                            bad = true;
-                                        }
-                                    }
-                                } else if (Character.isLetter(marker.charAt(0))) {
-                                    if (ind - 1 > 0) {
-                                        if (Character.isLetter(originalAuthors.charAt(ind - 1))) {
-                                            bad = true;
-                                        }
-                                    }
-                                    if (ind + 1 < originalAuthors.length()) {
-                                        if (Character.isLetter(originalAuthors.charAt(ind + 1))) {
-                                            bad = true;
-                                        }
-                                    }
-                                } else if (marker.charAt(0) == '*') {
-                                    if (ind - 1 > 0) {
-                                        if (originalAuthors.charAt(ind - 1) == '*') {
-                                            bad = true;
-                                        }
-                                    }
-                                    if (ind + 1 < originalAuthors.length()) {
-                                        if (originalAuthors.charAt(ind + 1) == '*') {
-                                            bad = true;
-                                        }
-                                    }
-                                }
-                            }
-                            if (marker.length() == 2) {
-                                // case with ** as marker
-                                if ((marker.charAt(0) == '*') && (marker.charAt(1) == '*')) {
-                                    if (ind - 2 > 0) {
-                                        if ((originalAuthors.charAt(ind - 1) == '*') &&
-                                                (originalAuthors.charAt(ind - 2) == '*')) {
-                                            bad = true;
-                                        }
-                                    }
-                                    if (ind + 2 < originalAuthors.length()) {
-                                        if ((originalAuthors.charAt(ind + 1) == '*') &&
-                                                (originalAuthors.charAt(ind + 2) == '*')) {
-                                            bad = true;
-                                        }
-                                    }
-                                    if ((ind - 1 > 0) && (ind + 1 < originalAuthors.length())) {
-                                        if ((originalAuthors.charAt(ind - 1) == '*') &&
-                                                (originalAuthors.charAt(ind + 1) == '*')) {
-                                            bad = true;
-                                        }
-                                    }
-                                }
-                            }
-                        }
-
-                        if ((ind != -1) && !bad) {
-                            // we find the associated author name
-                            String original = originalAuthors.toLowerCase();
-                            int p = 0;
-                            int best = -1;
-                            int ind2 = -1;
-                            int bestDistance = 1000;
-                            for (Person aut : fullAuthors) {
-                                if (!winners.contains(Integer.valueOf(p))) {
-                                    String lastname = aut.getLastName();
-
-                                    if (lastname != null) {
-                                        lastname = lastname.toLowerCase();
-                                        ind2 = original.indexOf(lastname, ind2 + 1);
-                                        int dist = Math.abs(ind - (ind2 + lastname.length()));
-                                        if (dist < bestDistance) {
-                                            best = p;
-                                            bestDistance = dist;
-                                        }
-                                    }
-                                }
-                                p++;
-                            }
-
-                            // and we associate this affiliation to this author
-                            if (best != -1) {
-                                fullAuthors.get(best).addAffiliation(aff);
-                                aff.setFailAffiliation(false);
-                                winners.add(Integer.valueOf(best));
-                            }
-
-                            from = ind + 1;
-                        }
-                        if ((ind != -1) && bad) {
-                            from = ind + 1;
-                            bad = false;
-                        }
-
-                        // circuit breaker
-                        if (ind > originalAuthors.length() || ind > 1000)
-                            break;
-                    }
-                }
-                indexAffiliation++;
-            }
-        } /*else if (nbAuthors == nbAffiliations) {
-            // risky heuristics, we distribute in this case one affiliation per author
-            // preserving author
-            // sometimes 2 affiliations belong both to 2 authors, for these case, the layout
-            // positioning should be studied
-            for (int p = 0; p < nbAuthors; p++) {
-                fullAuthors.get(p).addAffiliation(fullAffiliations.get(p));
-                System.out.println("attachment: " + p);
-                System.out.println(fullAuthors.get(p));
-                fullAffiliations.get(p).setFailAffiliation(false);
-            }
-          }*/
+        AuthorAffiliationAssigner.assign(fullAuthors, fullAffiliations, originalAuthors);
     }
 
     /**
