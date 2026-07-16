@@ -39,6 +39,7 @@ import org.grobid.core.factory.GrobidPoolingFactory;
 import org.grobid.core.lang.Language;
 import org.grobid.core.utilities.Consolidation;
 import org.grobid.core.utilities.LanguageUtilities;
+import org.grobid.core.utilities.TextUtilities;
 import org.grobid.core.utilities.Utilities;
 import org.grobid.core.utilities.counters.CntManager;
 import org.grobid.core.utilities.counters.impl.CntManagerFactory;
@@ -548,11 +549,11 @@ public class Engine implements Closeable {
      * @param pathRaw      : the path where to put the sequence labeling feature file
      * @param pathTEI      : the path where to put the annotated TEI representation (the
      *                     file to be corrected for gold-level training data)
-     * @param id           : an optional ID to be used in the TEI file and the full text
-     *                     file, -1 if not used
+     * @param id           : unused, kept for backward compatibility; the xml:id is now
+     *                     derived from the input file name
      */
     public void createTrainingMonograph(File inputFile, String pathRaw, String pathTEI, int id) {
-        Document doc = parsers.getMonographParser().createTrainingFromPDF(inputFile, pathRaw, pathTEI, id);
+        parsers.getMonographParser().createTrainingFromPDF(inputFile, pathRaw, pathTEI);
     }
 
     /**
@@ -563,11 +564,11 @@ public class Engine implements Closeable {
      * @param pathRaw      : the path where to put the sequence labeling feature file
      * @param pathTEI      : the path where to put the annotated TEI representation (the
      *                     file to be annotated for "from scratch" training data)
-     * @param id           : an optional ID to be used in the TEI file and the full text
-     *                     file, -1 if not used
+     * @param id           : unused, kept for backward compatibility; the xml:id is now
+     *                     derived from the input file name
      */
     public void createTrainingBlank(File inputFile, String pathRaw, String pathTEI, int id) {
-        parsers.getSegmentationParser().createBlankTrainingData(inputFile, pathRaw, pathTEI, id);
+        parsers.getSegmentationParser().createBlankTrainingData(inputFile, pathRaw, pathTEI);
     }
 
     /**
@@ -578,11 +579,12 @@ public class Engine implements Closeable {
      * @param pathRaw      : the path where to put the sequence labeling feature file
      * @param pathTEI      : the path where to put the annotated TEI representation (the
      *                       file to be corrected for gold-level training data)
-     * @param id           : an optional ID to be used in the TEI file, -1 if not used
+     * @param id           : unused, kept for backward compatibility; the xml:id is now
+     *                       derived from the input file name
      */
     public void createTraining(File inputFile, String pathRaw, String pathTEI, int id, GrobidModels.Flavor flavor) {
         System.out.println(inputFile.getPath());
-        Document doc = parsers.getFullTextParser(flavor).createTraining(inputFile, pathRaw, pathTEI, id, flavor);
+        parsers.getFullTextParser(flavor).createTraining(inputFile, pathRaw, pathTEI, flavor);
     }
 
     /**
@@ -691,8 +693,11 @@ public class Engine implements Closeable {
             // we process all pdf files in the directory
             File[] refFiles = path.listFiles(new FilenameFilter() {
                 public boolean accept(File dir, String name) {
-                    System.out.println(name);
-                    return name.endsWith(".pdf") || name.endsWith(".PDF");
+                    boolean isPdf = name.toLowerCase().endsWith(".pdf");
+                    if (isPdf) {
+                        System.out.println(name);
+                    }
+                    return isPdf;
                 }
             });
 
@@ -745,8 +750,11 @@ public class Engine implements Closeable {
             // we process all pdf files in the directory
             File[] refFiles = path.listFiles(new FilenameFilter() {
                 public boolean accept(File dir, String name) {
-                    System.out.println(name);
-                    return name.endsWith(".pdf") || name.endsWith(".PDF");
+                    boolean isPdf = name.toLowerCase().endsWith(".pdf");
+                    if (isPdf) {
+                        System.out.println(name);
+                    }
+                    return isPdf;
                 }
             });
 
@@ -798,8 +806,11 @@ public class Engine implements Closeable {
             // we process all pdf files in the directory
             File[] refFiles = path.listFiles(new FilenameFilter() {
                 public boolean accept(File dir, String name) {
-                    System.out.println(name);
-                    return name.endsWith(".pdf") || name.endsWith(".PDF");
+                    boolean isPdf = name.toLowerCase().endsWith(".pdf");
+                    if (isPdf) {
+                        System.out.println(name);
+                    }
+                    return isPdf;
                 }
             });
 
@@ -1175,8 +1186,11 @@ public class Engine implements Closeable {
             // we process all pdf files in the directory
             File[] refFiles = path.listFiles(new FilenameFilter() {
                 public boolean accept(File dir, String name) {
-                    System.out.println(name);
-                    return name.endsWith(".txt");
+                    boolean isTxt = name.toLowerCase().endsWith(".txt");
+                    if (isTxt) {
+                        System.out.println(name);
+                    }
+                    return isTxt;
                 }
             });
 
@@ -1185,7 +1199,6 @@ public class Engine implements Closeable {
 
             System.out.println(refFiles.length + " files to be processed.");
 
-            int n = 0;
             for (final File txtFile : refFiles) {
                 try {
                     // read file line by line, assuming one reference string per line
@@ -1211,30 +1224,33 @@ public class Engine implements Closeable {
                     if (bufferReference != null) {
                         bufferReference.append("\n");
 
-                        Writer writerReference = new OutputStreamWriter(new FileOutputStream(new File(resultPath +
-                                File.separator +
-                                txtFile.getName().replace(".txt", ".training.references.tei.xml")), false),
-                                StandardCharsets.UTF_8);
+                        // the sanitized base name is used for the training file name, while the xml:id
+                        // carries an additional leading '_' when required to be a valid NCName
+                        String baseName = TextUtilities.sanitizeFileName(
+                                txtFile.getName().replaceAll("(?i)\\.txt$", ""));
+                        String xmlId = TextUtilities.sanitizeXmlId(baseName);
 
-                        writerReference.write(
-                                "<?xml version=\"1.0\" ?>\n<TEI xml:space=\"preserve\" xmlns=\"http://www.tei-c.org/ns/1.0\" "
-                                        +
-                                        "xmlns:xlink=\"http://www.w3.org/1999/xlink\" "
-                                        +
-                                        "\n xmlns:mml=\"http://www.w3.org/1998/Math/MathML\">\n");
+                        File teiFile = new File(
+                                resultPath + File.separator + baseName + ".training.references.tei.xml");
+                        try (Writer writerReference = new OutputStreamWriter(new FileOutputStream(teiFile, false),
+                                StandardCharsets.UTF_8)) {
 
-                        writerReference.write(
-                                "\t<teiHeader>\n\t\t<fileDesc xml:id=\"_"
-                                        + n
-                                        +
-                                        "\"/>\n\t</teiHeader>\n\t<text>\n\t\t<front/>\n\t\t<body/>\n\t\t<back>\n");
+                            writerReference.write(
+                                    "<?xml version=\"1.0\" ?>\n<TEI xml:space=\"preserve\" xmlns=\"http://www.tei-c.org/ns/1.0\" "
+                                            + "xmlns:xlink=\"http://www.w3.org/1999/xlink\" "
+                                            + "\n xmlns:mml=\"http://www.w3.org/1998/Math/MathML\">\n");
 
-                        writerReference.write("<listBibl>\n");
+                            writerReference.write(
+                                    "\t<teiHeader>\n\t\t<fileDesc xml:id=\""
+                                            + xmlId
+                                            + "\"/>\n\t</teiHeader>\n\t<text>\n\t\t<front/>\n\t\t<body/>\n\t\t<back>\n");
 
-                        writerReference.write(bufferReference.toString());
+                            writerReference.write("<listBibl>\n");
 
-                        writerReference.write("\t\t</listBibl>\n\t</back>\n\t</text>\n</TEI>\n");
-                        writerReference.close();
+                            writerReference.write(bufferReference.toString());
+
+                            writerReference.write("\t\t</listBibl>\n\t</back>\n\t</text>\n</TEI>\n");
+                        }
                     }
                 } catch (final Exception exp) {
                     LOGGER.error(
@@ -1242,7 +1258,6 @@ public class Engine implements Closeable {
                                     + txtFile.getPath(),
                             exp);
                 }
-                n++;
             }
 
             return refFiles.length;

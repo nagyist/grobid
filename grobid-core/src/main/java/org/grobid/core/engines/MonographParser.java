@@ -18,6 +18,7 @@ package org.grobid.core.engines;
 import static org.apache.commons.lang3.StringUtils.*;
 
 import java.io.*;
+import java.nio.charset.StandardCharsets;
 import java.util.*;
 import java.util.regex.Matcher;
 
@@ -657,13 +658,11 @@ public class MonographParser extends AbstractParser {
      * @param inputFile input PDF file
      * @param pathFullText path to raw monograph featured sequence
      * @param pathTEI path to TEI
-     * @param id id
      */
     public Document createTrainingFromPDF(
             File inputFile,
             String pathRaw,
-            String pathTEI,
-            int id) {
+            String pathTEI) {
         if (tmpPath == null)
             throw new GrobidResourceException("Cannot process pdf file, because temp path is null.");
         if (!tmpPath.exists()) {
@@ -681,16 +680,19 @@ public class MonographParser extends AbstractParser {
                         inputFile.getAbsolutePath()
                         + "' does not exists.");
             }
-            String pdfFileName = inputFile.getName();
+            // the sanitized base name is used for the training file names, while the xml:id
+            // carries an additional leading '_' when required to be a valid NCName
+            String baseName = TextUtilities.sanitizeFileName(inputFile.getName().replaceAll("(?i)\\.pdf$", ""));
+            String xmlId = TextUtilities.sanitizeXmlId(baseName);
 
-            File outputTEIFile = new File(pathTEI + "/" + pdfFileName.replace(".pdf", "training.monograph.tei.xml"));
+            File outputTEIFile = new File(pathTEI + "/" + baseName + ".training.monograph.tei.xml");
             /* // commented out because it was making a test of the existence of a file before it was even created
                if (!outputTEIFile.exists()) {
                 throw new GrobidResourceException("Cannot train for monograph, because directory '" +
                        pathTEI + "' is not valid.");
             }*/
-            File outputRawFile = new File(pathRaw + "/" + pdfFileName.replace(".pdf", ".monograph.raw"));
-            /*if (!outputRawFile.exists()) {
+            /*File outputRawFile = new File(pathRaw + "/" + baseName + ".monograph.raw");
+            if (!outputRawFile.exists()) {
                 throw new GrobidResourceException("Cannot train for monograph, because directory '" +
                        pathRaw + "' is not valid.");
             }*/
@@ -710,7 +712,7 @@ public class MonographParser extends AbstractParser {
             StringBuilder builder = new StringBuilder();
             builder.append(
                     "<?xml version=\"1.0\" ?>\n<tei xml:space=\"preserve\">\n\t<teiHeader>\n\t\t<fileDesc xml:id=\""
-                            + id
+                            + xmlId
                             +
                             "\"/>\n\t</teiHeader>\n\t<text xml:lang=\""
                             + lang
@@ -738,9 +740,10 @@ public class MonographParser extends AbstractParser {
             builder.append("\t</text>\n</tei>");
 
             // write the TEI file
-            Writer writer = new OutputStreamWriter(new FileOutputStream(outputTEIFile, false), "UTF-8");
-            writer.write(builder.toString());
-            writer.close();
+            try (Writer writer = new OutputStreamWriter(new FileOutputStream(outputTEIFile, false),
+                    StandardCharsets.UTF_8)) {
+                writer.write(builder.toString());
+            }
 
         } catch (Exception e) {
             e.printStackTrace();

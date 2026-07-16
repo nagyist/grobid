@@ -317,8 +317,8 @@ public class TableParser extends AbstractParser {
                         +
                         "    <teiHeader>\n"
                         +
-                        "        <fileDesc xml:id=\"_"
-                        + id
+                        "        <fileDesc xml:id=\""
+                        + TextUtilities.sanitizeXmlId(id)
                         + "\"/>\n"
                         +
                         "    </teiHeader>\n"
